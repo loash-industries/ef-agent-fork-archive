@@ -14638,6 +14638,7 @@ dependencies = [
  "zeroclaw-memory",
  "zeroclaw-providers",
  "zeroclaw-spawn",
+ "zeroclaw-sui",
 ]
 
 [[package]]

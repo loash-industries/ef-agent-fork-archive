@@ -547,6 +547,12 @@ pub struct Config {
     #[nested]
     pub mcp: McpConfig,
 
+    /// Sui transaction submission (`[sui]`).
+    #[serde(default)]
+    #[nested]
+    #[group = "Tools"]
+    pub sui: SuiConfig,
+
     /// Dynamic node discovery configuration (`[nodes]`).
     #[serde(default)]
     #[nested]
@@ -5238,6 +5244,127 @@ fn default_mcp_enabled() -> bool {
 
 fn default_deferred_loading() -> bool {
     false
+}
+
+/// Sui transaction submission (`[sui]` section).
+///
+/// Everything here is off and empty by default: with `enabled = false` the
+/// `ef_submit` tool is never registered, and even once enabled an empty
+/// `allowed_targets` signs nothing. Widening is always a deliberate act.
+#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+#[prefix = "sui"]
+pub struct SuiConfig {
+    /// Register the `ef_submit` tool. Off by default: enabling it gives the
+    /// agent a key and the ability to commit it.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub enabled: bool,
+    /// Base URL of the sponsored-gas service, e.g. `https://gas.example`.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub gas_station_url: String,
+    /// Bearer token for the gas station.
+    #[tab(Settings)]
+    #[serde(default)]
+    #[secret]
+    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
+    pub gas_station_token: String,
+    /// Sui JSON-RPC endpoint, read once per submission for the reference gas
+    /// price. A hardcoded price goes stale at an epoch boundary and every
+    /// transaction is then rejected, so the price is fetched rather than set.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub rpc_url: String,
+    /// The agent's Ed25519 private key, as `suiprivkey1…` or 64 hex digits.
+    ///
+    /// Per ADR-013 this is its own configured value rather than anything
+    /// derived from the master encryption key: reusing that key for signing
+    /// is a custody decision that has not been recorded, so it is not made
+    /// here by default.
+    #[tab(Settings)]
+    #[serde(default)]
+    #[secret]
+    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
+    pub private_key: String,
+    /// Gas budget in MIST to reserve per submission.
+    #[tab(Settings)]
+    #[serde(default = "default_sui_gas_budget")]
+    pub gas_budget: u64,
+    /// How long to hold a gas reservation. Short is safer: the signature pins
+    /// the reserved coins, so a long window widens the equivocation surface.
+    #[tab(Settings)]
+    #[serde(default = "default_sui_reserve_secs")]
+    pub reserve_duration_secs: u64,
+    /// How old a prepared transaction may be when it reaches `ef_submit`.
+    #[tab(Settings)]
+    #[serde(default = "default_sui_max_prepared_age_secs")]
+    pub max_prepared_age_secs: u64,
+    /// Move calls the agent may sign, as `package::module::function`. The
+    /// package may be written in any spelling; it is compared as an address,
+    /// so `0x2::` matches the padded form the transaction bytes decode to.
+    /// Empty means nothing may be signed.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub allowed_targets: Vec<String>,
+    /// Per-asset ceilings on the builder's declared worst-case spend. An asset
+    /// with no entry may not be spent at all.
+    #[tab(SpendCaps)]
+    #[serde(default)]
+    #[nested]
+    #[natural_key = "asset"]
+    pub spend_caps: Vec<SuiSpendCapConfig>,
+}
+
+/// One entry in `[[sui.spend_caps]]`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
+#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
+#[prefix = "sui.spend_caps"]
+pub struct SuiSpendCapConfig {
+    /// Asset symbol this cap applies to, e.g. `CRED`.
+    #[serde(default)]
+    pub asset: String,
+    /// Spend kind the builder declares alongside the asset, e.g. `currency`.
+    /// An unrecognized kind is refused rather than waived.
+    #[serde(default = "default_sui_spend_kind")]
+    pub kind: String,
+    /// Inclusive ceiling, in the asset's base units, as a decimal string so
+    /// values beyond `u64` survive TOML and JSON round-trips.
+    #[serde(default)]
+    pub max_amount: String,
+}
+
+fn default_sui_gas_budget() -> u64 {
+    10_000_000
+}
+
+fn default_sui_reserve_secs() -> u64 {
+    30
+}
+
+fn default_sui_max_prepared_age_secs() -> u64 {
+    60
+}
+
+fn default_sui_spend_kind() -> String {
+    "currency".to_string()
+}
+
+impl Default for SuiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gas_station_url: String::new(),
+            gas_station_token: String::new(),
+            rpc_url: String::new(),
+            private_key: String::new(),
+            gas_budget: default_sui_gas_budget(),
+            reserve_duration_secs: default_sui_reserve_secs(),
+            max_prepared_age_secs: default_sui_max_prepared_age_secs(),
+            allowed_targets: Vec::new(),
+            spend_caps: Vec::new(),
+        }
+    }
 }
 
 impl Default for McpConfig {
@@ -19366,6 +19493,7 @@ impl Default for Config {
             transcription: TranscriptionConfig::default(),
             tts: TtsConfig::default(),
             mcp: McpConfig::default(),
+            sui: SuiConfig::default(),
             nodes: NodesConfig::default(),
             onboard_state: OnboardStateConfig::default(),
             notion: NotionConfig::default(),
@@ -28422,6 +28550,7 @@ auto_save = true
             transcription: TranscriptionConfig::default(),
             tts: TtsConfig::default(),
             mcp: McpConfig::default(),
+            sui: SuiConfig::default(),
             nodes: NodesConfig::default(),
             onboard_state: OnboardStateConfig::default(),
             notion: NotionConfig::default(),
@@ -29380,6 +29509,7 @@ default_temperature = 0.7
             transcription: TranscriptionConfig::default(),
             tts: TtsConfig::default(),
             mcp: McpConfig::default(),
+            sui: SuiConfig::default(),
             nodes: NodesConfig::default(),
             onboard_state: OnboardStateConfig::default(),
             notion: NotionConfig::default(),

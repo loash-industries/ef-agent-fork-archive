@@ -56,6 +56,7 @@ pub use zeroclaw_tools::composio::ComposioTool;
 pub use zeroclaw_tools::content_search::ContentSearchTool;
 pub use zeroclaw_tools::data_management::DataManagementTool;
 pub use zeroclaw_tools::discord_search::DiscordSearchTool;
+pub use zeroclaw_tools::ef_submit::EfSubmitTool;
 pub use zeroclaw_tools::email_read::EmailReadTool;
 pub use zeroclaw_tools::email_search::EmailSearchTool;
 pub use zeroclaw_tools::escalate::EscalateToHumanTool;
@@ -967,6 +968,34 @@ pub fn all_tools_with_runtime(
     // model out from under the parent (the switch signal is process-wide).
     if is_subagent_caller {
         tool_arcs.retain(|tool| tool.name() != ModelSwitchTool::NAME);
+    }
+
+    // ef_submit — the only tool that holds a signing key, so it is registered
+    // only when `[sui].enabled` is set. Construction fails closed: a bad
+    // allow-list entry or unreadable key leaves the tool absent rather than
+    // present with weaker rules than the operator wrote.
+    if root_config.sui.enabled {
+        match EfSubmitTool::from_config(&root_config.sui, security.clone()) {
+            Ok(tool) => {
+                let address = tool.address();
+                ::zeroclaw_log::record!(
+                    INFO,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                        .with_attrs(::serde_json::json!({"address": address})),
+                    "ef_submit: registered"
+                );
+                tool_arcs.push(Arc::new(tool));
+            }
+            Err(e) => {
+                ::zeroclaw_log::record!(
+                    WARN,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
+                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                        .with_attrs(::serde_json::json!({"error": e})),
+                    "ef_submit: not registered"
+                );
+            }
+        }
     }
 
     // Register discord_search if any configured Discord alias has
