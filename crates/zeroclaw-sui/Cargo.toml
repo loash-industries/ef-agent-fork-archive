@@ -1,0 +1,31 @@
+[package]
+name = "zeroclaw-sui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Sui transaction verification for ZeroClaw: validates externally prepared, unsigned transactions before the agent commits its key to them."
+publish = true
+
+[dependencies]
+# Canonical Sui type definitions and their BCS encoding. Chosen over the full
+# `sui-sdk` because verification only needs the wire types: `default = []` and
+# the `serde` feature pulls a small, self-contained tree. Hand-rolling these
+# BCS structs would put consensus-critical decoding in this repo.
+sui-sdk-types = { version = "0.4", default-features = false, features = ["serde"] }
+# Pinned to the 0.1 line that `sui-sdk-types` itself requires so cargo does not
+# resolve two incompatible BCS implementations into the same binary.
+bcs = "0.1.6"
+base64 = "0.22"
+serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+thiserror = "2"
+
+[dev-dependencies]
+# Integration tests craft hostile transactions (third-party transfers, forbidden
+# commands) and re-encode them, so they need the same wire stack the crate uses.
+sui-sdk-types = { version = "0.4", default-features = false, features = ["serde"] }
+bcs = "0.1.6"
+base64 = "0.22"
+serde_json = "1.0"
