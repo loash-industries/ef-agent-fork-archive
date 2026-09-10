@@ -13,10 +13,18 @@ publish = true
 # `sui-sdk` because verification only needs the wire types: `default = []` and
 # the `serde` feature pulls a small, self-contained tree. Hand-rolling these
 # BCS structs would put consensus-critical decoding in this repo.
-sui-sdk-types = { version = "0.4", default-features = false, features = ["serde"] }
+sui-sdk-types = { version = "0.4", default-features = false, features = ["serde", "hash"] }
+# Signing lives here rather than being hand-rolled: the intent-message framing
+# and digest that Sui expects are easy to get subtly wrong, and a wrong digest
+# produces a signature that verifies locally and is rejected on chain.
+sui-crypto = { version = "0.4", default-features = false, features = ["ed25519", "bech32"] }
 # Pinned to the 0.1 line that `sui-sdk-types` itself requires so cargo does not
 # resolve two incompatible BCS implementations into the same binary.
 bcs = "0.1.6"
+# Feature set kept aligned with `zeroclaw-tools` so the workspace resolves one
+# reqwest and one TLS backend.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider", "__rustls-ring"] }
+zeroize = "1.8"
 base64 = "0.22"
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
@@ -29,3 +37,5 @@ sui-sdk-types = { version = "0.4", default-features = false, features = ["serde"
 bcs = "0.1.6"
 base64 = "0.22"
 serde_json = "1.0"
+tokio = { version = "1.50", features = ["rt-multi-thread", "macros"] }
+wiremock = "0.6"
