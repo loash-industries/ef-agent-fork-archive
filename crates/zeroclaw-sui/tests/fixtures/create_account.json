@@ -1,0 +1,19 @@
+{
+  "txKindBytes": "AAEAIBERERERERERERERERERERERERERERERERERERERERERAgApG52nON/+3RjXxQSeXmeSJwIC4D88nZ20xwl2cL9usg9iYWxhbmNlX21hbmFnZXIDbmV3AAABAQIAAAEAAA==",
+  "sender": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "intent": {
+    "action": "create_account",
+    "params": {
+      "sender": "0x1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "targets": [
+      "0x291b9da738dffedd18d7c5049e5e6792270202e03f3c9d9db4c7097670bf6eb2::balance_manager::new"
+    ]
+  },
+  "pinnedObjects": [],
+  "builtAtMs": 1789076412502,
+  "notes": [
+    "Verify before signing: decode txKindBytes, assert its Move call targets equal intent.targets, bound the spend against intent.worstCaseSpend, then dry-run.",
+    "Sign promptly. pinnedObjects records the object versions this build resolved; holding two prepared transactions over the same owned objects risks equivocation."
+  ]
+}
