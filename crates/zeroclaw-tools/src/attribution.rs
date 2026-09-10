@@ -30,6 +30,7 @@ use crate::composio::ComposioTool;
 use crate::content_search::ContentSearchTool;
 use crate::data_management::DataManagementTool;
 use crate::discord_search::DiscordSearchTool;
+use crate::ef_submit::EfSubmitTool;
 use crate::escalate::EscalateToHumanTool;
 use crate::file_download::FileDownloadTool;
 use crate::file_edit::FileEditTool;
@@ -104,6 +105,7 @@ tool_attribution!(BrowserDelegateTool, ToolKind::Plugin);
 #[cfg(feature = "tools-external")]
 tool_attribution!(BrowserOpenTool, ToolKind::Plugin);
 tool_attribution!(CalculatorTool, ToolKind::Plugin);
+tool_attribution!(EfSubmitTool, ToolKind::Plugin);
 tool_attribution!(CanvasTool, ToolKind::Plugin);
 tool_attribution!(ChannelRoomTool, ToolKind::Plugin);
 #[cfg(feature = "tool-claude-code")]

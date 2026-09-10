@@ -31,15 +31,22 @@ pub mod error;
 pub mod gas_station;
 pub mod policy;
 pub mod prepared;
+pub mod rpc;
 pub mod signer;
 pub mod submit;
 pub mod target;
 pub mod verify;
 
+// Re-exported because it is unavoidable in this crate's public API:
+// `SubmitPolicy::deny_all` takes one, so a caller cannot use the crate without
+// naming the type.
+pub use sui_sdk_types::Address;
+
 pub use error::VerifyError;
 pub use gas_station::{ExecutionOutcome, GasReservation, GasStation, GasStationError};
 pub use policy::{SpendCap, SubmitPolicy};
 pub use prepared::{PinnedObject, PreparedIntent, PreparedTransaction, WorstCaseSpend};
+pub use rpc::{RpcError, SuiRpc};
 pub use signer::{AgentSigner, SignerError};
 pub use submit::{SubmitError, SubmitRequest, Submitted, submit};
 pub use target::{MoveTarget, TargetParseError};

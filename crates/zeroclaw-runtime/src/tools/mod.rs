@@ -74,6 +74,7 @@ pub use zeroclaw_tools::composio::ComposioTool;
 pub use zeroclaw_tools::content_search::ContentSearchTool;
 pub use zeroclaw_tools::data_management::DataManagementTool;
 pub use zeroclaw_tools::discord_search::DiscordSearchTool;
+pub use zeroclaw_tools::ef_submit::EfSubmitTool;
 #[cfg(feature = "tools-external")]
 pub use zeroclaw_tools::email_read::EmailReadTool;
 #[cfg(feature = "tools-external")]
@@ -2595,6 +2596,34 @@ fn all_tools_with_runtime_on_thread(
         Arc::new(CanvasTool::new(canvas_store.unwrap_or_default()))
     );
     register_tool!("TodoWrite", Arc::new(TodoWriteTool::new()));
+
+    // ef_submit — the only tool that holds a signing key, so it is registered
+    // only when `[sui].enabled` is set. Construction fails closed: a bad
+    // allow-list entry or unreadable key leaves the tool absent rather than
+    // present with weaker rules than the operator wrote.
+    if root_config.sui.enabled {
+        match EfSubmitTool::from_config(&root_config.sui, security.clone()) {
+            Ok(tool) => {
+                let address = tool.address();
+                ::zeroclaw_log::record!(
+                    INFO,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                        .with_attrs(::serde_json::json!({"address": address})),
+                    "ef_submit: registered"
+                );
+                tool_arcs.push(Arc::new(tool));
+            }
+            Err(e) => {
+                ::zeroclaw_log::record!(
+                    WARN,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
+                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                        .with_attrs(::serde_json::json!({"error": e})),
+                    "ef_submit: not registered"
+                );
+            }
+        }
+    }
 
     // Register discord_search if any configured Discord alias has
     // archive enabled. Multiple Discord aliases are supported (one per

@@ -16,6 +16,7 @@ zeroclaw-config = { workspace = true, default-features = false }
 zeroclaw-providers.workspace = true
 zeroclaw-memory.workspace = true
 zeroclaw-infra.workspace = true
+zeroclaw-sui.workspace = true
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
