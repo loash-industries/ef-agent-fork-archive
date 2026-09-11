@@ -5260,11 +5260,14 @@ pub struct SuiConfig {
     #[tab(Settings)]
     #[serde(default)]
     pub enabled: bool,
-    /// Base URL of the sponsored-gas service, e.g. `https://gas.example`.
+    /// Base URL of the signer-api sponsorship service, e.g.
+    /// `https://signer-api.trinary.exchange`.
     #[tab(Settings)]
     #[serde(default)]
     pub gas_station_url: String,
-    /// Bearer token for the gas station.
+    /// Bearer JWT issued by the signer-api. Not the Trinary Exchange API key:
+    /// the sponsorship endpoints authenticate with a JWT and reject the API
+    /// key with `Invalid or expired token`.
     #[tab(Settings)]
     #[serde(default)]
     #[secret]
@@ -5287,15 +5290,14 @@ pub struct SuiConfig {
     #[secret]
     #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
     pub private_key: String,
-    /// Gas budget in MIST to reserve per submission.
+    /// Ceiling on the gas budget the sponsor may set, in MIST.
+    ///
+    /// The signer-api decides the actual budget from its own per-function
+    /// table, so this is a refusal threshold rather than a request: a budget
+    /// above it stops the submission before anything is signed.
     #[tab(Settings)]
-    #[serde(default = "default_sui_gas_budget")]
-    pub gas_budget: u64,
-    /// How long to hold a gas reservation. Short is safer: the signature pins
-    /// the reserved coins, so a long window widens the equivocation surface.
-    #[tab(Settings)]
-    #[serde(default = "default_sui_reserve_secs")]
-    pub reserve_duration_secs: u64,
+    #[serde(default = "default_sui_max_gas_budget")]
+    pub max_gas_budget: u64,
     /// How old a prepared transaction may be when it reaches `ef_submit`.
     #[tab(Settings)]
     #[serde(default = "default_sui_max_prepared_age_secs")]
@@ -5334,12 +5336,10 @@ pub struct SuiSpendCapConfig {
     pub max_amount: String,
 }
 
-fn default_sui_gas_budget() -> u64 {
-    10_000_000
-}
-
-fn default_sui_reserve_secs() -> u64 {
-    30
+fn default_sui_max_gas_budget() -> u64 {
+    // The service's own daily ceiling is 10 SUI; one transaction should be a
+    // small fraction of that.
+    100_000_000
 }
 
 fn default_sui_max_prepared_age_secs() -> u64 {
@@ -5358,8 +5358,7 @@ impl Default for SuiConfig {
             gas_station_token: String::new(),
             rpc_url: String::new(),
             private_key: String::new(),
-            gas_budget: default_sui_gas_budget(),
-            reserve_duration_secs: default_sui_reserve_secs(),
+            max_gas_budget: default_sui_max_gas_budget(),
             max_prepared_age_secs: default_sui_max_prepared_age_secs(),
             allowed_targets: Vec::new(),
             spend_caps: Vec::new(),

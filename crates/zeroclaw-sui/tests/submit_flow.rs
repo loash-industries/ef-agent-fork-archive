@@ -7,7 +7,6 @@
 //! here as "the pieces fit", not "this works on chain".
 
 use std::str::FromStr;
-use std::time::Duration;
 
 use base64::Engine as _;
 use sui_crypto::SuiVerifier;
@@ -90,34 +89,41 @@ fn request<'a>(prepared: &'a PreparedTransaction, policy: &'a SubmitPolicy) -> S
     SubmitRequest {
         prepared,
         policy,
-        gas_budget: 10_000_000,
+        max_gas_budget: 100_000_000,
         gas_price: 1_000,
-        reserve_for: Duration::from_secs(30),
         now_ms: prepared.built_at_ms + 1_000,
     }
 }
 
 fn reserve_ok() -> serde_json::Value {
+    // Flat, exactly as signer-api answers: no `{result, error}` envelope, and
+    // the budget comes from the service rather than from us.
     serde_json::json!({
-        "result": {
-            "sponsor_address": SPONSOR,
-            "reservation_id": 42u64,
-            "gas_coins": [{ "objectId": COIN, "version": 7u64, "digest": DIGEST }],
-        },
-        "error": serde_json::Value::Null,
+        "sponsor_address": SPONSOR,
+        "reservation_id": 42u64,
+        "gas_coins": [{ "objectId": COIN, "version": "7", "digest": DIGEST }],
+        "gas_budget": 5_000_000u64,
+        "expires_at": "2026-09-11T00:00:00.000Z",
+    })
+}
+
+fn execute_ok() -> serde_json::Value {
+    serde_json::json!({
+        "digest": "8vV1AbCdEfGhJkLmNpQrStUvWxYz1234567890aBcDeF",
+        "effects": { "status": { "status": "success" } },
     })
 }
 
 async fn mock_station(reserve: ResponseTemplate, execute: ResponseTemplate) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/v1/reserve_gas"))
+        .and(path("/v1/sponsorship/reserve"))
         .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
         .respond_with(reserve)
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/v1/execute_tx"))
+        .and(path("/v1/sponsorship/execute"))
         .and(header("authorization", format!("Bearer {TOKEN}").as_str()))
         .respond_with(execute)
         .mount(&server)
@@ -133,11 +139,7 @@ async fn a_verified_payload_is_signed_and_submitted() {
     let policy = policy(signer.address());
     let server = mock_station(
         ResponseTemplate::new(200).set_body_json(reserve_ok()),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "effects": { "status": { "status": "success" } },
-            "tx_block_response": serde_json::Value::Null,
-            "error": serde_json::Value::Null,
-        })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
 
@@ -147,6 +149,8 @@ async fn a_verified_payload_is_signed_and_submitted() {
         .expect("submission should succeed");
 
     assert_eq!(submitted.reservation_id, 42);
+    assert_eq!(submitted.gas_budget, 5_000_000);
+    assert!(!submitted.outcome.digest.is_empty());
     assert_eq!(submitted.targets.len(), 1);
     assert_eq!(
         submitted.targets[0].canonical(),
@@ -164,10 +168,7 @@ async fn the_submitted_signature_verifies_over_the_submitted_transaction() {
     let policy = policy(signer.address());
     let server = mock_station(
         ResponseTemplate::new(200).set_body_json(reserve_ok()),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "effects": { "status": { "status": "success" } },
-            "error": serde_json::Value::Null,
-        })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -180,7 +181,7 @@ async fn the_submitted_signature_verifies_over_the_submitted_transaction() {
         .await
         .expect("requests recorded")
         .iter()
-        .filter(|r| r.url.path() == "/v1/execute_tx")
+        .filter(|r| r.url.path() == "/v1/sponsorship/execute")
         .cloned()
         .collect::<Vec<_>>()
         .leak()
@@ -230,7 +231,7 @@ async fn the_submitted_signature_verifies_over_the_submitted_transaction() {
         transaction.gas_payment.owner,
         Address::from_str(SPONSOR).expect("sponsor parses")
     );
-    assert_eq!(transaction.gas_payment.budget, 10_000_000);
+    assert_eq!(transaction.gas_payment.budget, 5_000_000);
     assert_eq!(transaction.gas_payment.price, 1_000);
     assert_eq!(transaction.gas_payment.objects.len(), 1);
     assert!(matches!(
@@ -249,7 +250,7 @@ async fn an_unverifiable_payload_never_reserves_gas() {
     let policy = SubmitPolicy::deny_all(signer.address());
     let server = mock_station(
         ResponseTemplate::new(200).set_body_json(reserve_ok()),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "effects": {} })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -274,7 +275,7 @@ async fn a_key_that_does_not_match_the_policy_is_refused_before_anything_else() 
     let policy = policy(other.address());
     let server = mock_station(
         ResponseTemplate::new(200).set_body_json(reserve_ok()),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "effects": {} })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -299,17 +300,18 @@ async fn a_key_that_does_not_match_the_policy_is_refused_before_anything_else() 
 // ── Gas-station failure modes ───────────────────────────────────────────────
 
 #[tokio::test]
-async fn a_refusal_carried_in_a_200_body_is_still_a_refusal() {
-    // The service answers 200 with an `error` field. Reading only the status
-    // would treat this as a successful reservation.
+async fn a_reserve_refusal_names_the_unapproved_function() {
+    // signer-api refuses with a flat `{message, error, statusCode}` body. The
+    // message is the operator-useful part and must survive to the caller.
     let (signer, prepared) = signer_and_prepared();
     let policy = policy(signer.address());
     let server = mock_station(
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "result": serde_json::Value::Null,
-            "error": "no gas coins available",
+        ResponseTemplate::new(403).set_body_json(serde_json::json!({
+            "message": "Move function 'balance_manager::new' is not approved for sponsorship",
+            "error": "Forbidden",
+            "statusCode": 403,
         })),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "effects": {} })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -318,8 +320,12 @@ async fn a_refusal_carried_in_a_200_body_is_still_a_refusal() {
         .await
         .expect_err("must refuse");
     match err {
-        SubmitError::GasStation(GasStationError::Refused { message }) => {
-            assert_eq!(message, "no gas coins available");
+        SubmitError::GasStation(GasStationError::Refused { status, message }) => {
+            assert_eq!(status, 403);
+            assert!(
+                message.contains("not approved for sponsorship"),
+                "{message}"
+            );
         }
         other => panic!("expected a refusal, got {other}"),
     }
@@ -332,8 +338,6 @@ async fn an_execution_refusal_is_surfaced() {
     let server = mock_station(
         ResponseTemplate::new(200).set_body_json(reserve_ok()),
         ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "effects": serde_json::Value::Null,
-            "tx_block_response": serde_json::Value::Null,
             "error": "reservation expired",
         })),
     )
@@ -344,8 +348,8 @@ async fn an_execution_refusal_is_surfaced() {
         .await
         .expect_err("must refuse");
     match err {
-        SubmitError::GasStation(GasStationError::Refused { message }) => {
-            assert_eq!(message, "reservation expired");
+        SubmitError::GasStation(GasStationError::ExecutionFailed { reason }) => {
+            assert_eq!(reason, "reservation expired");
         }
         other => panic!("expected a refusal, got {other}"),
     }
@@ -357,14 +361,13 @@ async fn an_empty_reservation_is_refused_rather_than_signed() {
     let policy = policy(signer.address());
     let server = mock_station(
         ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "result": {
-                "sponsor_address": SPONSOR,
-                "reservation_id": 1u64,
-                "gas_coins": [],
-            },
-            "error": serde_json::Value::Null,
+            "sponsor_address": SPONSOR,
+            "reservation_id": 1u64,
+            "gas_coins": [],
+            "gas_budget": 5_000_000u64,
+            "expires_at": "2026-09-11T00:00:00.000Z",
         })),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "effects": {} })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -372,7 +375,10 @@ async fn an_empty_reservation_is_refused_rather_than_signed() {
     let err = submit(request(&prepared, &policy), &signer, &station)
         .await
         .expect_err("must refuse");
-    assert!(matches!(err, SubmitError::NoGasCoins), "{err}");
+    assert!(
+        matches!(err, SubmitError::GasStation(GasStationError::NoGasCoins)),
+        "{err}"
+    );
 }
 
 #[tokio::test]
@@ -381,7 +387,7 @@ async fn an_http_error_is_surfaced_not_swallowed() {
     let policy = policy(signer.address());
     let server = mock_station(
         ResponseTemplate::new(503).set_body_string("upstream down"),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "effects": {} })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -390,7 +396,9 @@ async fn an_http_error_is_surfaced_not_swallowed() {
         .await
         .expect_err("must refuse");
     match err {
-        SubmitError::GasStation(GasStationError::Status { status }) => assert_eq!(status, 503),
+        SubmitError::GasStation(GasStationError::Refused { status, .. }) => {
+            assert_eq!(status, 503);
+        }
         other => panic!("expected an HTTP status error, got {other}"),
     }
 }
@@ -401,14 +409,13 @@ async fn an_unusable_gas_coin_is_refused() {
     let policy = policy(signer.address());
     let server = mock_station(
         ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "result": {
-                "sponsor_address": SPONSOR,
-                "reservation_id": 1u64,
-                "gas_coins": [{ "objectId": "not-an-object-id", "version": 1u64, "digest": DIGEST }],
-            },
-            "error": serde_json::Value::Null,
+            "sponsor_address": SPONSOR,
+            "reservation_id": 1u64,
+            "gas_coins": [{ "objectId": "not-an-object-id", "version": "1", "digest": DIGEST }],
+            "gas_budget": 5_000_000u64,
+            "expires_at": "2026-09-11T00:00:00.000Z",
         })),
-        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "effects": {} })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
     )
     .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -433,16 +440,13 @@ async fn the_reservation_request_matches_the_service_contract() {
     let policy = policy(signer.address());
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/v1/reserve_gas"))
+        .and(path("/v1/sponsorship/reserve"))
         .respond_with(ResponseTemplate::new(200).set_body_json(reserve_ok()))
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path("/v1/execute_tx"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({ "effects": { "ok": true } })),
-        )
+        .and(path("/v1/sponsorship/execute"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(execute_ok()))
         .mount(&server)
         .await;
     let station = GasStation::new(server.uri(), TOKEN);
@@ -453,32 +457,87 @@ async fn the_reservation_request_matches_the_service_contract() {
     let calls = server.received_requests().await.expect("recorded");
     let reserve = calls
         .iter()
-        .find(|r| r.url.path() == "/v1/reserve_gas")
+        .find(|r| r.url.path() == "/v1/sponsorship/reserve")
         .expect("reserve was called");
     let body: serde_json::Value = serde_json::from_slice(&reserve.body).expect("JSON");
-    assert_eq!(body["gas_budget"], 10_000_000);
-    assert_eq!(body["reserve_duration_secs"], 30);
+    // reserve carries the transaction itself; the service derives the budget.
+    let tx_bytes = body["tx_bytes"].as_str().expect("tx_bytes present");
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(tx_bytes)
+        .expect("tx_bytes is base64");
+    let unsigned: Transaction = bcs::from_bytes(&raw).expect("decodes as a Transaction");
+    assert!(
+        body.get("gas_budget").is_none(),
+        "budget is the service's call"
+    );
+    // Gas is a placeholder at this point: the sponsor is not known yet.
+    assert_eq!(unsigned.gas_payment.budget, 0);
+    assert!(unsigned.gas_payment.objects.is_empty());
+    assert_eq!(unsigned.sender, signer.address());
 }
 
 #[tokio::test]
-async fn an_over_long_reservation_is_rejected_locally() {
-    let station = GasStation::new("https://unused.example", TOKEN);
-    let err = station
-        .reserve(1_000, Duration::from_secs(11 * 60))
+async fn a_sponsor_budget_above_the_ceiling_is_refused_before_signing() {
+    // The service sets the budget, so the only defence is refusing one that is
+    // larger than the operator sanctioned — and refusing it before signing.
+    let (signer, prepared) = signer_and_prepared();
+    let policy = policy(signer.address());
+    let server = mock_station(
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "sponsor_address": SPONSOR,
+            "reservation_id": 9u64,
+            "gas_coins": [{ "objectId": COIN, "version": "7", "digest": DIGEST }],
+            "gas_budget": 900_000_000u64,
+            "expires_at": "2026-09-11T00:00:00.000Z",
+        })),
+        ResponseTemplate::new(200).set_body_json(execute_ok()),
+    )
+    .await;
+    let station = GasStation::new(server.uri(), TOKEN);
+
+    let err = submit(request(&prepared, &policy), &signer, &station)
         .await
         .expect_err("must refuse");
+    match err {
+        SubmitError::GasBudgetTooHigh { budget, max } => {
+            assert_eq!(budget, 900_000_000);
+            assert_eq!(max, 100_000_000);
+        }
+        other => panic!("expected a budget refusal, got {other}"),
+    }
+
+    let calls = server.received_requests().await.expect("recorded");
     assert!(
-        matches!(err, GasStationError::ReserveDuration { .. }),
-        "{err}"
+        calls
+            .iter()
+            .all(|r| r.url.path() != "/v1/sponsorship/execute"),
+        "must not submit after refusing the budget"
     );
 }
 
 #[tokio::test]
-async fn a_zero_gas_budget_is_rejected_locally() {
-    let station = GasStation::new("https://unused.example", TOKEN);
-    let err = station
-        .reserve(0, Duration::from_secs(30))
+async fn a_move_abort_reported_in_a_200_is_not_a_success() {
+    // The service answers 200 for a transaction that executed and aborted.
+    // Reading only the status code would report this as submitted.
+    let (signer, prepared) = signer_and_prepared();
+    let policy = policy(signer.address());
+    let server = mock_station(
+        ResponseTemplate::new(200).set_body_json(reserve_ok()),
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "digest": "8vV1AbCdEfGhJkLmNpQrStUvWxYz1234567890aBcDeF",
+            "effects": { "status": { "status": "failure", "error": "MoveAbort(x, 3)" } },
+        })),
+    )
+    .await;
+    let station = GasStation::new(server.uri(), TOKEN);
+
+    let err = submit(request(&prepared, &policy), &signer, &station)
         .await
-        .expect_err("must refuse");
-    assert!(matches!(err, GasStationError::ZeroBudget), "{err}");
+        .expect_err("must surface the abort");
+    match err {
+        SubmitError::GasStation(GasStationError::ExecutionFailed { reason }) => {
+            assert_eq!(reason, "MoveAbort(x, 3)");
+        }
+        other => panic!("expected an on-chain failure, got {other}"),
+    }
 }
