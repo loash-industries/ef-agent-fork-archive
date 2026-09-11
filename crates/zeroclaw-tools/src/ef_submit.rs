@@ -30,8 +30,7 @@ pub struct EfSubmitTool {
     station: Arc<GasStation>,
     rpc: SuiRpc,
     policy: Arc<SubmitPolicy>,
-    gas_budget: u64,
-    reserve_for: Duration,
+    max_gas_budget: u64,
     security: Arc<SecurityPolicy>,
 }
 
@@ -43,8 +42,7 @@ impl EfSubmitTool {
         station: Arc<GasStation>,
         rpc: SuiRpc,
         policy: Arc<SubmitPolicy>,
-        gas_budget: u64,
-        reserve_for: Duration,
+        max_gas_budget: u64,
         security: Arc<SecurityPolicy>,
     ) -> Self {
         Self {
@@ -52,8 +50,7 @@ impl EfSubmitTool {
             station,
             rpc,
             policy,
-            gas_budget,
-            reserve_for,
+            max_gas_budget,
             security,
         }
     }
@@ -121,8 +118,7 @@ impl EfSubmitTool {
             )),
             SuiRpc::new(config.rpc_url.trim()),
             Arc::new(policy),
-            config.gas_budget,
-            Duration::from_secs(config.reserve_duration_secs),
+            config.max_gas_budget,
             security,
         ))
     }
@@ -135,7 +131,7 @@ impl std::fmt::Debug for EfSubmitTool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EfSubmitTool")
             .field("address", &self.signer.address())
-            .field("gas_budget", &self.gas_budget)
+            .field("max_gas_budget", &self.max_gas_budget)
             .field("allowed_targets", &self.policy.allowed_targets.len())
             .finish_non_exhaustive()
     }
@@ -187,12 +183,14 @@ impl Tool for EfSubmitTool {
             "type": "object",
             "properties": {
                 "submitted": { "type": "boolean" },
+                "digest": { "type": "string" },
                 "reservationId": { "type": "integer" },
+                "gasBudget": { "type": "integer" },
                 "targets": { "type": "array", "items": { "type": "string" } },
                 "gasPrice": { "type": "integer" },
                 "effects": { "type": "object" }
             },
-            "required": ["submitted", "targets"]
+            "required": ["submitted", "digest", "targets"]
         }))
     }
 
@@ -244,9 +242,8 @@ impl Tool for EfSubmitTool {
         let request = SubmitRequest {
             prepared: &prepared,
             policy: &self.policy,
-            gas_budget: self.gas_budget,
+            max_gas_budget: self.max_gas_budget,
             gas_price,
-            reserve_for: self.reserve_for,
             now_ms,
         };
 
@@ -255,16 +252,19 @@ impl Tool for EfSubmitTool {
                 let targets: Vec<String> =
                     submitted.targets.iter().map(|t| t.canonical()).collect();
                 let summary = format!(
-                    "Submitted {} call(s) as {}: {}",
+                    "Submitted {} call(s) as {} (digest {}): {}",
                     targets.len(),
                     self.signer.address(),
+                    submitted.outcome.digest,
                     targets.join(", ")
                 );
                 let data = json!({
                     "submitted": true,
+                    "digest": submitted.outcome.digest,
                     "reservationId": submitted.reservation_id,
                     "targets": targets,
                     "gasPrice": gas_price,
+                    "gasBudget": submitted.gas_budget,
                     "effects": submitted.outcome.effects,
                 });
                 Ok(ToolResult {
@@ -301,8 +301,7 @@ mod tests {
             Arc::new(GasStation::new("https://unused.example", "token")),
             SuiRpc::new("https://unused.example"),
             policy,
-            10_000_000,
-            Duration::from_secs(30),
+            100_000_000,
             security(),
         )
     }
