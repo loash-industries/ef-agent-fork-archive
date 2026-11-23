@@ -1,0 +1,5 @@
+name: ef-agent
+team: platform
+language: rust
+framework: none
+repo: loash-industries/ef-agent

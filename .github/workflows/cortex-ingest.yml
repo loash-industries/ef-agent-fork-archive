@@ -1,0 +1,21 @@
+name: Cortex Ingestion
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - .cortex/**
+  workflow_dispatch:
+
+jobs:
+  cortex-ingest:
+    # Public repo, so the GitHub-hosted public-workflows copy (same inputs).
+    uses: loash-industries/public-workflows/.github/workflows/js-cortex-ingest.yaml@07910f832a96bfc3557dba155356bd902eee47b6 # v0.3.1
+    if: github.ref == 'refs/heads/master'
+    with:
+      cortex_api_url: "https://cortex-relay-dev-api.trinary.exchange"
+      # Default is `docs`, which here is the whole upstream ZeroClaw book.
+      # Point at a path that does not exist so only .cortex/ is ingested.
+      docs_dir: ".cortex/docs"
+    secrets:
+      CORTEX_INGEST_TOKEN: ${{ secrets.CORTEX_INGEST_TOKEN }}
