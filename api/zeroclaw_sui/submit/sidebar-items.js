@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SubmitError"],"fn":["submit"],"struct":["SubmitRequest","Submitted"]};
