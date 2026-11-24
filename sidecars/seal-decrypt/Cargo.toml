@@ -1,0 +1,60 @@
+[package]
+name = "seal-decrypt"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+# Deliberately its own workspace, not a member of the ZeroClaw workspace, and
+# not a path dependency of any crate in it.
+#
+# This crate needs BLS12-381, which means `fastcrypto`, which is git-only and
+# arrives whole with an older RustCrypto generation in tow. Measured against the
+# main workspace it added 68 packages and 43 duplicate crate-versions — two
+# `sha2`, two `digest`, two `block-buffer`, `syn` 1 alongside 2.
+#
+# Admitting that into the graph that signs transactions would cost two
+# `allow-git` entries and roughly twenty duplicate-version skips in
+# `deny.toml`. Keeping it here costs one process boundary instead, and its own
+# `[workspace]` table gives it a separate `Cargo.lock` so none of that tree can
+# reach ours. The duplicate `sui-sdk-types` below is a case in point: harmless
+# here, disqualifying there.
+[workspace]
+
+[dependencies]
+# Mysten's Seal protocol, wrapped by a client that does key-server discovery,
+# committee resolution, share verification and the IBE/TSS/DEM work in one call
+# — the same shape `@mysten/seal`'s `SealClient.decrypt` has in TypeScript.
+# Hand-rolling that against the raw primitives is how this file looked before,
+# and it was reimplementing a library badly.
+#
+# `default-features = false` drops `native-sui-sdk`, which would pull the entire
+# Sui monorepo at a testnet tag for one on-chain read we already do over GraphQL.
+# Verified: without it the graph is 242 packages and contains no monorepo crates.
+seal-sdk-rs = { git = "https://github.com/gfusee/seal-sdk-rs", default-features = false, features = [
+    "client",
+    "rustls-tls",
+] }
+
+# Must be the same major as the one `seal-sdk-rs` implements `HttpClient` for,
+# because the client it is handed is a `reqwest::Client` value, not a trait
+# object — a 0.12 client would be a different type entirely.
+reqwest = { version = "0.11", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+
+# Pinned to the exact rev `seal-sdk-rs` uses. A different rev would compile but
+# produce a *different* `Ed25519Signature` type, and the `Signer` impl below
+# would no longer satisfy the trait.
+fastcrypto = { git = "https://github.com/MystenLabs/fastcrypto", rev = "d1fcb853196c3de7888ed8fad74f419b8c8fbe3b", features = [
+    "aes",
+] }
+
+anyhow = "1"
+async-trait = "0.1"
+base64 = "0.22"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util"] }

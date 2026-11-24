@@ -100,15 +100,6 @@ impl EfSubmitTool {
                 .map_err(|e| format!("sui.allowed_targets entry `{raw}` is invalid: {e}"))?;
             policy = policy.allow_target(target);
         }
-        for cap in &config.spend_caps {
-            let amount = cap.max_amount.trim().parse::<u128>().map_err(|_| {
-                format!(
-                    "sui.spend_caps entry for `{}` has a non-numeric max_amount `{}`",
-                    cap.asset, cap.max_amount
-                )
-            })?;
-            policy = policy.allow_spend(cap.kind.clone(), cap.asset.clone(), amount);
-        }
 
         Ok(Self::new(
             Arc::new(signer),
@@ -286,7 +277,6 @@ mod tests {
 
     use super::*;
     use zeroclaw_config::policy::SecurityPolicy;
-    use zeroclaw_config::schema::SuiSpendCapConfig;
     use zeroclaw_sui::Address;
 
     fn security() -> Arc<SecurityPolicy> {
@@ -407,18 +397,6 @@ mod tests {
         config.allowed_targets.push("0x2::coin".to_string());
         let err = EfSubmitTool::from_config(&config, security()).expect_err("must refuse");
         assert!(err.contains("allowed_targets"), "{err}");
-    }
-
-    #[test]
-    fn a_non_numeric_spend_cap_prevents_registration() {
-        let mut config = valid_config();
-        config.spend_caps.push(SuiSpendCapConfig {
-            asset: "CRED".to_string(),
-            kind: "currency".to_string(),
-            max_amount: "lots".to_string(),
-        });
-        let err = EfSubmitTool::from_config(&config, security()).expect_err("must refuse");
-        assert!(err.contains("spend_caps"), "{err}");
     }
 
     #[test]

@@ -404,66 +404,41 @@ fn too_many_commands_are_refused() {
     assert!(matches!(err, VerifyError::TooManyCommands { .. }), "{err}");
 }
 
-// ── Spend ceilings ──────────────────────────────────────────────────────────
+// ── Declared spend is not gated ─────────────────────────────────────────────
+//
+// `worstCaseSpend` is the builder's own figure and cannot be checked against
+// the bytes, so nothing here reads it. These pin that: whatever the builder
+// declares — any amount, any asset, any kind, even a non-numeric amount — the
+// decision rests entirely on the target allowlist.
 
 #[test]
-fn a_declared_spend_with_no_configured_cap_is_refused() {
-    let prepared = with_spend(fixture(), "currency", "CRED", "1000000");
-    let err =
-        verify(&prepared, &permissive_policy(), just_after_build(&prepared)).expect_err("refuse");
-    assert!(
-        matches!(err, VerifyError::SpendNotPermitted { .. }),
-        "{err}"
-    );
+fn any_declared_currency_spend_verifies() {
+    let prepared = with_spend(fixture(), "currency", "CRED", &u128::MAX.to_string());
+    verify(&prepared, &permissive_policy(), just_after_build(&prepared))
+        .expect("no spend gate applies");
 }
 
 #[test]
-fn a_spend_over_its_cap_is_refused() {
-    let prepared = with_spend(fixture(), "currency", "CRED", "1000001");
-    let policy = permissive_policy().allow_spend("currency", "CRED", 1_000_000);
-    let err = verify(&prepared, &policy, just_after_build(&prepared)).expect_err("refuse");
-    assert!(matches!(err, VerifyError::SpendExceedsCap { .. }), "{err}");
+fn an_unknown_asset_and_kind_verify_just_the_same() {
+    let prepared = with_spend(fixture(), "warehouse_receipt", "SUI", "1");
+    verify(&prepared, &permissive_policy(), just_after_build(&prepared))
+        .expect("kind and asset are not consulted");
 }
 
 #[test]
-fn a_spend_at_its_cap_is_allowed() {
-    let prepared = with_spend(fixture(), "currency", "CRED", "1000000");
-    let policy = permissive_policy().allow_spend("currency", "CRED", 1_000_000);
-    verify(&prepared, &policy, just_after_build(&prepared)).expect("exactly at the cap is ok");
-}
-
-#[test]
-fn a_spend_of_an_unrecognized_kind_is_refused() {
-    // An unknown kind must not slip past the ceiling it was meant to describe.
-    let prepared = with_spend(fixture(), "warehouse_receipt", "CRED", "1");
-    let policy = permissive_policy().allow_spend("currency", "CRED", u128::MAX);
-    let err = verify(&prepared, &policy, just_after_build(&prepared)).expect_err("refuse");
-    assert!(
-        matches!(err, VerifyError::SpendNotPermitted { .. }),
-        "{err}"
-    );
-}
-
-#[test]
-fn a_cap_on_one_asset_does_not_cover_another() {
-    let prepared = with_spend(fixture(), "currency", "SUI", "1");
-    let policy = permissive_policy().allow_spend("currency", "CRED", u128::MAX);
-    let err = verify(&prepared, &policy, just_after_build(&prepared)).expect_err("refuse");
-    assert!(
-        matches!(err, VerifyError::SpendNotPermitted { .. }),
-        "{err}"
-    );
-}
-
-#[test]
-fn a_non_numeric_spend_amount_is_refused() {
+fn a_non_numeric_declared_amount_is_not_even_parsed() {
     let prepared = with_spend(fixture(), "currency", "CRED", "lots");
-    let policy = permissive_policy().allow_spend("currency", "CRED", u128::MAX);
+    verify(&prepared, &permissive_policy(), just_after_build(&prepared))
+        .expect("the figure is never read");
+}
+
+#[test]
+fn an_unallowlisted_target_is_still_refused_whatever_the_spend_says() {
+    // The allowlist is now the only bound, so this is the load-bearing test.
+    let prepared = with_spend(fixture(), "currency", "CRED", "1");
+    let policy = SubmitPolicy::deny_all(address(AGENT));
     let err = verify(&prepared, &policy, just_after_build(&prepared)).expect_err("refuse");
-    assert!(
-        matches!(err, VerifyError::UnparseableSpendAmount { .. }),
-        "{err}"
-    );
+    assert!(!matches!(err, VerifyError::Stale { .. }), "{err}");
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
