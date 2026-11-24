@@ -1,0 +1,9 @@
+{
+  "note": "Recorded by the ZERO-2 spike on 2026-11-24. An AWS KMS ECC_NIST_EDWARDS25519 key signed Blake2b-256(intent || tx_bytes) with ED25519_SHA_512 and message type RAW. Devnet executed the transaction with status success.",
+  "network": "devnet",
+  "address": "0x9331442cc4101396749053b18e700901ceda52a30572d00459f4f01f9096658b",
+  "tx_bytes": "AAACAAjoAwAAAAAAAAAgkzFELMQQE5Z0kFOxjnAJAc7aUqMFctAEWfTwH5CWZYsCAgABAQAAAQEDAAAAAAEBAJMxRCzEEBOWdJBTsY5wCQHO2lKjBXLQBFn08B+QlmWLARu7U/7cuIdMUOMjCuO6SzJD5Hq463DcEetYFuzYpCzqAQAAAAAAAAAg8Ljd4b4IH6NFv91asX0VfBsIbmg56RLwXFj5e4KMcC2TMUQsxBATlnSQU7GOcAkBztpSowVy0ARZ9PAfkJZli+gDAAAAAAAAQEtMAAAAAAAA",
+  "signature": "ABNE/VPOZtjkau3q29hnK+ntDPGuImksmBa28fSw0xrx63cbdpYeOBa475vGUile/ObJYMNtGtDBS0ye7nAdTAfu/FuYbjn9IzKzvzpF5686F+gPyrQ0t+FP5H1rQJoGrQ==",
+  "signing_message_hex": "4c17788ac0e587a4ae5c46d741043cf614d735061e257c011b2ea74b1b6b5dec",
+  "digest": "35R2DGt79FfzpBkiCcNqXq4S7Uzo1RA5djuQ1h2oqUpE"
+}

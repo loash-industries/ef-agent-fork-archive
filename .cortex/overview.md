@@ -20,6 +20,7 @@ must hold a key.
 | TriEx read and prepare via `triex-mcp` | `master` (PR #1) | Works with configuration only. Covered by an ignored live test |
 | `zeroclaw-sui` crate and `ef_submit` tool | `master` (PR #2) | Built, unit-tested and registered behind `[sui].enabled`. **Never submitted to a real chain** |
 | Seal / Keyspace decryption, GraphQL RPC, spend caps removed | `master` (PR #4) | Built and unit-tested. Not yet exercised against a live key server |
+| KMS-held keys | `zeroclaw-sui/tests/kms_signature.rs`, `scripts/ef-agent/kms_sui_spike.py` (PR for ZERO-2) | Proven on devnet: an AWS KMS `ECC_NIST_EDWARDS25519` key signs `Blake2b-256(intent \|\| tx_bytes)` with `ED25519_SHA_512`, message type `RAW`, and Sui accepts it. No backend in `zeroclaw-sui` yet (ZERO-9) |
 | Pilots on Kubernetes | Plane ROAD-66, tasks ZERO-1 to ZERO-32 | Planned. Keys move to AWS KMS behind a signer sidecar; the repo moves to a scaffolded private `ef-agent` on `main` |
 | Cortex onboarding | `.cortex/` | Docs only |
 
