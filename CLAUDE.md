@@ -16,3 +16,11 @@ _No custom hooks defined yet._
 ## Slash Commands
 
 _No custom slash commands defined yet._
+
+## Cortex
+
+**MCP Server:** `https://cortex-relay-dev-api.trinary.exchange/mcp` — service id `ef-agent`.
+
+1. At session start call `get_conventions` with `scope: "general"`.
+2. Before a task, call `search_context` with the task and `service_id: "ef-agent"`.
+3. Before every commit, call `chronicle_changes` with `service_id: "ef-agent"`, prepend the returned entry to `.cortex/changelog.md`, and apply any `overviewEdits` to `.cortex/overview.md`.
