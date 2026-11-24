@@ -26,6 +26,15 @@ bcs = "0.1.6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider", "__rustls-ring"] }
 zeroize = "1.8"
 base64 = "0.22"
+# The Seal session message embeds a timestamp rendered exactly as chrono's
+# `DateTime<Utc>` Display, because the key server rebuilds the same string with
+# chrono before verifying our signature. Formatting it by hand would work until
+# it differed by one character and every fetch failed authentication.
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+# Ephemeral Seal session keys need a CSPRNG. `getrandom` is used directly rather
+# than `rand` so no `rand_core` trait-version has to line up with `sui-crypto`.
+getrandom = "0.3"
+hex = "0.4"
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 thiserror = "2"

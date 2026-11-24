@@ -6170,9 +6170,15 @@ pub struct SuiConfig {
     #[secret]
     #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
     pub gas_station_token: String,
-    /// Sui JSON-RPC endpoint, read once per submission for the reference gas
-    /// price. A hardcoded price goes stale at an epoch boundary and every
-    /// transaction is then rejected, so the price is fetched rather than set.
+    /// Sui **GraphQL** endpoint, e.g. `https://graphql.testnet.sui.io/graphql`.
+    ///
+    /// Read once per submission for the reference gas price, and again when
+    /// Seal needs a key server's public key. A hardcoded price goes stale at an
+    /// epoch boundary and every transaction is then rejected, so it is fetched
+    /// rather than set.
+    ///
+    /// Not a fullnode URL: JSON-RPC on public fullnodes is deprecated and now
+    /// answers `-32601`, so a `https://fullnode.…` value here fails every read.
     #[tab(Settings)]
     #[serde(default)]
     pub rpc_url: String,
@@ -6206,31 +6212,94 @@ pub struct SuiConfig {
     #[tab(Settings)]
     #[serde(default)]
     pub allowed_targets: Vec<String>,
-    /// Per-asset ceilings on the builder's declared worst-case spend. An asset
-    /// with no entry may not be spent at all.
-    #[tab(SpendCaps)]
+    /// Seal / Keyspace decryption (`[sui.seal]`).
     #[serde(default)]
     #[nested]
-    #[natural_key = "asset"]
-    pub spend_caps: Vec<SuiSpendCapConfig>,
+    pub seal: SuiSealConfig,
 }
 
-/// One entry in `[[sui.spend_caps]]`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
+/// Seal decryption settings (`[sui.seal]`).
+///
+/// Reading a Keyspace entry needs a wallet signature over a Seal session
+/// message, and then BLS12-381 work that happens in the out-of-workspace
+/// `seal-decrypt` binary. Everything here is default-closed: with no values the
+/// tool is not registered, and with no `allowed_entry_hosts` no ciphertext may
+/// be fetched at all.
+#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "sui.spend_caps"]
-pub struct SuiSpendCapConfig {
-    /// Asset symbol this cap applies to, e.g. `CRED`.
+#[prefix = "sui.seal"]
+pub struct SuiSealConfig {
+    /// Register the `ef_keyspace_decrypt` tool. Off by default: enabling it
+    /// lets the agent turn encrypted entries into plaintext in its own context.
+    #[tab(Settings)]
     #[serde(default)]
-    pub asset: String,
-    /// Spend kind the builder declares alongside the asset, e.g. `currency`.
-    /// An unrecognized kind is refused rather than waived.
-    #[serde(default = "default_sui_spend_kind")]
-    pub kind: String,
-    /// Inclusive ceiling, in the asset's base units, as a decimal string so
-    /// values beyond `u64` survive TOML and JSON round-trips.
+    pub enabled: bool,
+    /// Seal aggregator base URL, e.g.
+    /// `https://seal-aggregator-testnet.mystenlabs.com`.
+    ///
+    /// For a committee (V2) key server the URL is configuration rather than an
+    /// on-chain value; the aggregator exposes `/v1/fetch_key` and fans out to
+    /// members itself. Nothing here runs a key server.
+    #[tab(Settings)]
     #[serde(default)]
-    pub max_amount: String,
+    pub aggregator_url: String,
+    /// On-chain object id of the key server, e.g.
+    /// `0xb012378c9f3799fb5b1a7083da74a4069e3c3f1c93de0b27212a5799ce1e1e98`.
+    /// Its IBE public key is read from this object and used to verify every
+    /// share the aggregator returns.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub key_server_object_id: String,
+    /// Keyspace package id. Names the package in the signed session message and
+    /// is the `seal_approve` target, so a message for any other package is
+    /// refused before signing.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub package_id: String,
+    /// Session lifetime in minutes, and the ceiling this agent will sign for.
+    ///
+    /// One signature authorises fetching decryption keys for anything in the
+    /// package this address may read, for the whole window — so this is the
+    /// main control on how long a stolen session stays useful. Short by
+    /// default; the browser SDK's longer sessions are a UX tradeoff we do not
+    /// need to copy.
+    #[tab(Settings)]
+    #[serde(default = "default_sui_seal_session_ttl_min")]
+    pub session_ttl_min: u16,
+    /// Path to the `seal-decrypt` binary.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub sidecar_path: String,
+    /// Hosts the encrypted entry may be fetched from, e.g.
+    /// `s3.eu-central-003.backblazeb2.com`. Compared against the URI host
+    /// exactly, after requiring `https`.
+    ///
+    /// Empty means no entry may be fetched. The entry URI reaches this tool
+    /// through the agent, so without an allowlist a prompt-injected agent could
+    /// aim the fetch at any host this process can reach.
+    #[tab(Settings)]
+    #[serde(default)]
+    pub allowed_entry_hosts: Vec<String>,
+}
+
+impl Default for SuiSealConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            aggregator_url: String::new(),
+            key_server_object_id: String::new(),
+            package_id: String::new(),
+            // Derived `Default` would make this 0, which is not the same as
+            // "unset" — a zero TTL yields a session that is already expired.
+            session_ttl_min: default_sui_seal_session_ttl_min(),
+            sidecar_path: String::new(),
+            allowed_entry_hosts: Vec::new(),
+        }
+    }
+}
+
+fn default_sui_seal_session_ttl_min() -> u16 {
+    10
 }
 
 fn default_sui_max_gas_budget() -> u64 {
@@ -6241,10 +6310,6 @@ fn default_sui_max_gas_budget() -> u64 {
 
 fn default_sui_max_prepared_age_secs() -> u64 {
     60
-}
-
-fn default_sui_spend_kind() -> String {
-    "currency".to_string()
 }
 
 impl Default for SuiConfig {
@@ -6258,7 +6323,7 @@ impl Default for SuiConfig {
             max_gas_budget: default_sui_max_gas_budget(),
             max_prepared_age_secs: default_sui_max_prepared_age_secs(),
             allowed_targets: Vec::new(),
-            spend_caps: Vec::new(),
+            seal: SuiSealConfig::default(),
         }
     }
 }
@@ -29417,6 +29482,28 @@ impl HasPropKind for serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+
+    // ── [sui]: a legacy spend_caps block must not degrade the section ──
+    //
+    // Spend gating is gone entirely, so `[[sui.spend_caps]]` is now an unknown
+    // key. `SuiConfig` is not `deny_unknown_fields`, so a config still carrying
+    // one must parse and keep the rest of `[sui]` in effect — a reset here
+    // would blank `allowed_targets` and silently unregister `ef_submit`.
+
+    #[::core::prelude::v1::test]
+    fn a_legacy_spend_caps_block_is_ignored_rather_than_rejected() {
+        let cfg: super::SuiConfig = toml::from_str(concat!(
+            "enabled = true\n",
+            "allowed_targets = [\"0x2::coin::zero\"]\n",
+            "[[spend_caps]]\n",
+            "asset = \"CRED\"\n",
+            "kind = \"currency\"\n",
+            "max_amount = \"1000000000\"\n",
+        ))
+        .expect("a stale block must not break the section");
+        assert!(cfg.enabled);
+        assert_eq!(cfg.allowed_targets, vec!["0x2::coin::zero".to_string()]);
+    }
     #[::core::prelude::v1::test]
     fn config_application_semantic_changed_paths_detects_unmasked_credentials() {
         let mut previous = Config::default();

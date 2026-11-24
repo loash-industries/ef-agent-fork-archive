@@ -64,17 +64,4 @@ pub enum VerifyError {
         declared: Vec<String>,
         found: Vec<String>,
     },
-
-    #[error("declared spend amount `{amount}` is not a valid integer")]
-    UnparseableSpendAmount { amount: String },
-
-    #[error("no spend cap configured for {kind}/{asset}")]
-    SpendNotPermitted { kind: String, asset: String },
-
-    #[error("declared spend of {amount} {asset} exceeds the cap of {max_amount}")]
-    SpendExceedsCap {
-        asset: String,
-        amount: u128,
-        max_amount: u128,
-    },
 }

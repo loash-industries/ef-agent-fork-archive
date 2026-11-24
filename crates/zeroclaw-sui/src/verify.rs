@@ -6,6 +6,12 @@
 //! is refused either way. A verifier that trusted the JSON would inherit the
 //! builder's authority, which is the one thing keeping the key out of the
 //! builder is meant to prevent.
+//!
+//! NOTE: there is deliberately no spend check. `intent.worstCaseSpend` is the
+//! builder's own figure and cannot be re-derived from the bytes, so bounding it
+//! never bound a hostile builder — it only caught honest mistakes while reading
+//! like a limit. What bounds loss is the target allowlist: the agent may call
+//! only the functions the operator approved, and can lose only what those reach.
 
 use std::collections::BTreeSet;
 use std::str::FromStr;
@@ -41,7 +47,6 @@ pub fn verify(
 ) -> Result<VerifiedTransaction, VerifyError> {
     check_sender(prepared, policy)?;
     check_freshness(prepared, policy, now_ms)?;
-    check_spend(prepared, policy)?;
 
     let kind = decode_kind(&prepared.tx_kind_bytes)?;
     let programmable = programmable_body(&kind)?;
@@ -105,45 +110,6 @@ fn check_freshness(
     let max_age_ms = duration_ms(policy.max_age);
     if age_ms > max_age_ms {
         return Err(VerifyError::Stale { age_ms, max_age_ms });
-    }
-    Ok(())
-}
-
-/// A declared spend must fall under a configured ceiling for its exact
-/// kind/asset pair. An unrecognized kind is refused rather than ignored,
-/// because ignoring it would silently waive the ceiling it describes.
-///
-/// **This check is weaker than the rest of this module and must not be read as
-/// a spend bound.** Every other check here re-derives its facts from the
-/// transaction bytes; this one cannot. Amounts live in `Pure` inputs whose
-/// meaning depends on the callee's ABI, so deciding which argument is "the
-/// amount" would require per-contract knowledge this crate does not have. A
-/// hostile builder can therefore understate `worstCaseSpend` and pass.
-///
-/// What actually bounds loss is the target allowlist — a transaction can only
-/// call functions the operator approved — together with whatever balance those
-/// functions can reach. Treat this as a guard against an honest builder's
-/// mistake, not against a dishonest one.
-fn check_spend(prepared: &PreparedTransaction, policy: &SubmitPolicy) -> Result<(), VerifyError> {
-    let Some(spend) = prepared.intent.worst_case_spend.as_ref() else {
-        return Ok(());
-    };
-    let amount =
-        u128::from_str(&spend.amount).map_err(|_| VerifyError::UnparseableSpendAmount {
-            amount: spend.amount.clone(),
-        })?;
-    let Some(cap) = policy.spend_cap_for(&spend.kind, &spend.asset) else {
-        return Err(VerifyError::SpendNotPermitted {
-            kind: spend.kind.clone(),
-            asset: spend.asset.clone(),
-        });
-    };
-    if amount > cap.max_amount {
-        return Err(VerifyError::SpendExceedsCap {
-            asset: spend.asset.clone(),
-            amount,
-            max_amount: cap.max_amount,
-        });
     }
     Ok(())
 }

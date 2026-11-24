@@ -17,7 +17,7 @@ use std::fmt;
 
 use sui_crypto::SuiSigner;
 use sui_crypto::ed25519::Ed25519PrivateKey;
-use sui_sdk_types::{Address, PersonalMessage, Transaction, UserSignature};
+use sui_sdk_types::{Address, PersonalMessage, SimpleSignature, Transaction, UserSignature};
 use zeroize::Zeroizing;
 
 /// Why key material could not be loaded, or a signature could not be produced.
@@ -114,6 +114,36 @@ impl AgentSigner {
             .map_err(|e| SignerError::Signing {
                 reason: e.to_string(),
             })
+    }
+
+    /// The agent's Ed25519 public key, raw bytes.
+    ///
+    /// Public by definition — the certificate the key servers check carries it,
+    /// so it has to be able to leave this process.
+    pub fn public_key_bytes(&self) -> [u8; 32] {
+        *self.key.public_key().inner()
+    }
+
+    /// Sign a personal message and return the bare 64-byte Ed25519 signature.
+    ///
+    /// Seal's key servers want the raw signature, not Sui's `UserSignature`
+    /// envelope with its scheme flag and embedded public key, so the envelope is
+    /// unwrapped here rather than in a caller that would have to know why.
+    ///
+    /// The caller is responsible for having validated the message first; see the
+    /// module note on why that matters.
+    pub fn sign_personal_message_bytes(&self, message: &[u8]) -> Result<Vec<u8>, SignerError> {
+        let signature = self.sign_personal_message(&PersonalMessage(message.into()))?;
+        match signature {
+            UserSignature::Simple(SimpleSignature::Ed25519 { signature, .. }) => {
+                Ok(signature.inner().to_vec())
+            }
+            // Unreachable while this type holds an Ed25519 key, but a silent
+            // wrong-length signature would fail far away from the cause.
+            other => Err(SignerError::Signing {
+                reason: format!("expected an ed25519 signature, produced {other:?}"),
+            }),
+        }
     }
 
     /// Sign a personal message.
