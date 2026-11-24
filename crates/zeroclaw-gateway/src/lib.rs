@@ -1056,6 +1056,11 @@ pub async fn run_gateway(
     // config handle, so reloads that re-instantiate the config Arc are honored
     // without a restart; shares the global price snapshot the cost path reads.
     zeroclaw_providers::pricing::spawn_refresher(config_state.clone());
+    // Live context-window refresher, same contract: once per process, no-op
+    // unless a provider sets `live_context_window = true`. Updates the
+    // in-memory `context_window`, which the default context-trimming budget
+    // is derived from.
+    zeroclaw_providers::context_window::spawn_refresher(config_state.clone());
 
     // SSE broadcast channel for real-time events.
     // Use an externally provided sender (e.g. from the daemon) so that other

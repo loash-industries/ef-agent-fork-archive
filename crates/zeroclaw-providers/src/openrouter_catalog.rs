@@ -20,6 +20,10 @@ struct ModelEntry {
     id: String,
     #[serde(default)]
     pricing: Option<ModelPricing>,
+    /// OpenRouter's advertised max input tokens. Absent on some entries, so
+    /// `None` stays "unknown" rather than collapsing to a stub window.
+    #[serde(default)]
+    context_length: Option<usize>,
 }
 
 /// Flat catalog — model IDs only (used by `list_models`).
@@ -32,6 +36,7 @@ static CACHED_CATALOG_WITH_PRICING: OnceCell<Arc<Vec<ModelEntryWithPricing>>> =
 struct ModelEntryWithPricing {
     id: String,
     pricing: Option<ModelPricing>,
+    context_length: Option<usize>,
 }
 
 async fn fetch_catalog() -> Result<Arc<Vec<String>>> {
@@ -77,6 +82,7 @@ fn parse_catalog_with_pricing(bytes: &[u8]) -> Result<Vec<ModelEntryWithPricing>
         .map(|m| ModelEntryWithPricing {
             id: m.id,
             pricing: m.pricing,
+            context_length: m.context_length,
         })
         .collect())
 }
@@ -112,9 +118,9 @@ fn filter_by_vendor_with_pricing(
             e.id.strip_prefix(&needle).map(|slug| ModelInfo {
                 id: slug.to_string(),
                 pricing: e.pricing.clone(),
-                // OpenRouter publishes `context_length`; wiring it is a
-                // follow-up. `None` means "unknown", never a stub value.
-                context_window: None,
+                // `None` when the entry omits `context_length`: "unknown",
+                // never a stub value.
+                context_window: e.context_length,
             })
         })
         .collect();
@@ -155,9 +161,9 @@ fn all_models_with_pricing(
         .map(|e| ModelInfo {
             id: e.id.clone(),
             pricing: e.pricing.clone(),
-            // OpenRouter publishes `context_length`; wiring it is a follow-up.
-            // `None` means "unknown", never a stub value.
-            context_window: None,
+            // `None` when the entry omits `context_length`: "unknown", never
+            // a stub value.
+            context_window: e.context_length,
         })
         .collect();
     models.sort_by(|a, b| a.id.cmp(&b.id));
@@ -190,6 +196,42 @@ mod tests {
             {"id": "tencent/hunyuan-turbos"}
         ]
     }"#;
+
+    /// Entries with and without `context_length`, so the "unknown" case is
+    /// pinned alongside the wired one.
+    const CATALOG_WITH_WINDOWS: &str = r#"{
+        "data": [
+            {"id": "z-ai/glm-5.3-flash", "context_length": 1310720},
+            {"id": "z-ai/glm-legacy"}
+        ]
+    }"#;
+
+    #[test]
+    fn catalog_carries_the_advertised_context_length() {
+        let entries = parse_catalog_with_pricing(CATALOG_WITH_WINDOWS.as_bytes()).unwrap();
+        let models = all_models_with_pricing(&entries);
+        let flash = models
+            .iter()
+            .find(|m| m.id == "z-ai/glm-5.3-flash")
+            .unwrap();
+        assert_eq!(flash.context_window, Some(1_310_720));
+    }
+
+    #[test]
+    fn entry_without_context_length_reports_unknown_not_a_stub() {
+        let entries = parse_catalog_with_pricing(CATALOG_WITH_WINDOWS.as_bytes()).unwrap();
+        let models = all_models_with_pricing(&entries);
+        let legacy = models.iter().find(|m| m.id == "z-ai/glm-legacy").unwrap();
+        assert_eq!(legacy.context_window, None);
+    }
+
+    #[test]
+    fn vendor_filtered_catalog_carries_the_context_length_too() {
+        let entries = parse_catalog_with_pricing(CATALOG_WITH_WINDOWS.as_bytes()).unwrap();
+        let models = filter_by_vendor_with_pricing(&entries, "z-ai").unwrap();
+        let flash = models.iter().find(|m| m.id == "glm-5.3-flash").unwrap();
+        assert_eq!(flash.context_window, Some(1_310_720));
+    }
 
     #[test]
     fn parses_catalog_into_flat_id_list() {

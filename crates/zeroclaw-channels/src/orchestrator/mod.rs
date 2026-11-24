@@ -12408,6 +12408,7 @@ pub async fn start_channels(
     }
 
     zeroclaw_providers::pricing::spawn_refresher(config_arc.clone());
+    zeroclaw_providers::context_window::spawn_refresher(config_arc.clone());
 
     let enabled_agents = enabled_agent_aliases(&config);
     if enabled_agents.is_empty() {

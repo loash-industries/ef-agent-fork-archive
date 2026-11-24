@@ -983,6 +983,20 @@ pub struct ModelProviderConfig {
     #[tab(Advanced)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<usize>,
+    /// Keep [`Self::context_window`] in sync with the provider's own `/models`
+    /// listing instead of relying on the value written at setup time. A
+    /// background task re-fetches the model's advertised window hourly and
+    /// updates the in-memory config, so switching `model` (including via the
+    /// `model_switch` tool) re-resolves the window without an operator edit
+    /// and without a restart. Only families whose listing advertises it are
+    /// supported -- OpenRouter and the OpenAI-compatible gateways that publish
+    /// `context_length`; see `zeroclaw_providers::fetch_context_window`.
+    /// A fetch failure keeps the previous value rather than clearing it.
+    /// Default `false`: off means no fetching, and the configured (or
+    /// setup-time) `context_window` stands unchanged.
+    #[tab(Advanced)]
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub live_context_window: bool,
     /// Path to a PEM-encoded CA certificate for TLS connections to this provider.
     /// Must be an absolute path; shell expansion (e.g. `~`) is not performed.
     /// Leave unset to use the system's default trust store.
@@ -4206,9 +4220,17 @@ impl Config {
     pub fn effective_max_context_tokens(&self, agent_alias: &str) -> usize {
         // Token budget for preemptive context/history trimming (runtime profile override).
         // This is NOT the provider max_tokens output limit and NOT the model's context window.
+        //
+        // Unset, the budget tracks the model rather than a flat constant: a
+        // fixed 32k starved a 1M-context model of ~97% of its window, and an
+        // operator who swapped models had to retune this by hand. The window
+        // itself is resolved by `effective_model_context_window`, so a
+        // provider with `live_context_window = true` moves this budget too.
         self.runtime_profile_for_agent(agent_alias)
             .and_then(|p| p.max_context_tokens)
-            .unwrap_or(32_000)
+            .unwrap_or_else(|| {
+                context_budget_from_window(self.effective_model_context_window(agent_alias))
+            })
     }
 
     /// The model's context window exactly as configured, or `None` when no
@@ -4726,6 +4748,30 @@ pub const TEMPERATURE_RANGE: std::ops::RangeInclusive<f64> = 0.0..=2.0;
 /// [`Config::configured_model_context_window`] and say "not configured" when it
 /// returns `None`, rather than echoing this value as the model's real capacity.
 pub const UNCONFIGURED_CONTEXT_WINDOW_FALLBACK: usize = 32_000;
+
+/// Share of the model's context window used as the default trimming budget
+/// when a runtime profile sets no explicit `max_context_tokens`.
+///
+/// The remaining fifth is headroom, not waste: the turn still has to fit the
+/// model's own output plus the overflow-recovery pass, which re-trims against
+/// 90% of the window. Budgeting the full window would let a turn trim to a
+/// size the provider still rejects.
+const DEFAULT_CONTEXT_BUDGET_NUMERATOR: usize = 4;
+const DEFAULT_CONTEXT_BUDGET_DENOMINATOR: usize = 5;
+
+/// Derive the default context-trimming budget from a model context window.
+///
+/// Saturating throughout so a pathological window (`usize::MAX` from a
+/// malformed listing) cannot overflow the multiply, and clamped to at least 1
+/// so a tiny window never yields a zero budget that would trim every message.
+#[must_use]
+pub fn context_budget_from_window(model_context_window: usize) -> usize {
+    model_context_window
+        .saturating_mul(DEFAULT_CONTEXT_BUDGET_NUMERATOR)
+        .checked_div(DEFAULT_CONTEXT_BUDGET_DENOMINATOR)
+        .unwrap_or(model_context_window)
+        .max(1)
+}
 
 /// Defaults to 0 so configs without an explicit `schema_version` are recognized
 /// as pre-versioning and get migrated.
