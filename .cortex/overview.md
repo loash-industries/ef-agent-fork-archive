@@ -12,15 +12,16 @@ Everything ZeroClaw already does (LLM providers, chat channels, memory, cron,
 gateway, MCP client) is inherited unchanged. The fork adds only the half that
 must hold a key.
 
-## Status (2026-11-23)
+## Status (2026-11-24)
 
 | Piece | Where | State |
 |---|---|---|
-| ZeroClaw runtime | `master` | Tracks upstream |
-| TriEx read and prepare via `triex-mcp` | PR #1 (`test/triex-mcp-connectivity-spike`) | Works with configuration only. Covered by an ignored live test |
-| `zeroclaw-sui` crate and `ef_submit` tool | PR #2 (`feat/sui-prepared-transaction-verification`) | Built and unit-tested. **Never submitted to a real chain** |
-| Seal / Keyspace decryption (`ef_keyspace_decrypt`, `sidecars/seal-decrypt`) | Same branch, not yet committed | In progress |
-| Cortex onboarding | This directory | Docs only |
+| ZeroClaw runtime | `master` | Rebased onto upstream `zeroclaw-labs/zeroclaw` v0.9.0. The fork's commits sit on top |
+| TriEx read and prepare via `triex-mcp` | `master` (PR #1) | Works with configuration only. Covered by an ignored live test |
+| `zeroclaw-sui` crate and `ef_submit` tool | `master` (PR #2) | Built, unit-tested and registered behind `[sui].enabled`. **Never submitted to a real chain** |
+| Seal / Keyspace decryption, GraphQL RPC, spend caps removed | `master` (PR #4) | Built and unit-tested. Not yet exercised against a live key server |
+| Pilots on Kubernetes | Plane ROAD-66, tasks ZERO-1 to ZERO-32 | Planned. Keys move to AWS KMS behind a signer sidecar; the repo moves to a scaffolded private `ef-agent` on `main` |
+| Cortex onboarding | `.cortex/` | Docs only |
 
 ## How ZeroClaw works
 
